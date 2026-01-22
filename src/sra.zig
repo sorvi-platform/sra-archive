@@ -53,6 +53,7 @@ pub fn validatePath(path: []const u8) PathValidationError!void {
     if (path[0] == '/') return error.InvalidPath;
     if (std.mem.indexOf(u8, path, "//")) |_| return error.InvalidPath;
     if (path[path.len - 1] == '/') return error.InvalidPath;
+    if (std.mem.indexOfAny(u8, path, "<>:\"\\|?*")) |_| return error.InvalidPath;
     if (!std.unicode.utf8ValidateSlice(path)) return error.InvalidPath;
     var iter = std.mem.tokenizeScalar(u8, path, '/');
     while (iter.next()) |part| {
