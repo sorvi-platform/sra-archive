@@ -1,0 +1,13 @@
+.{
+    .name = .sra_archive,
+    .version = "0.1.0",
+    .fingerprint = 0x717526d45ab2dc79,
+    .dependencies = .{},
+    .paths = .{
+        "LICENSE",
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "bin",
+    },
+}
