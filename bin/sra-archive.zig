@@ -156,6 +156,7 @@ pub fn doExtract(archive_path: []const u8, args: *std.process.ArgIterator) !void
         var map: std.StringArrayHashMapUnmanaged(sra.IndexEntry) = .empty;
         var iter = try srar.iterator();
         while (try iter.next(&srar)) |entry| {
+            try srar.validateEntry(entry);
             const path = std.mem.sliceTo(path_table[entry.path_offset - srar.path_table_offset..], 0);
             try sra.validatePath(path);
             try map.putNoClobber(arena.allocator(), path, entry);
@@ -180,10 +181,11 @@ pub fn doExtract(archive_path: []const u8, args: *std.process.ArgIterator) !void
         const node = root_node.start(archive_path, iter.num_entries);
         defer node.end();
         while (try iter.next(&srar)) |entry| {
+            try srar.validateEntry(entry);
             const path = std.mem.sliceTo(path_table[entry.path_offset - srar.path_table_offset..], 0);
+            try sra.validatePath(path);
             const child = node.start(path, 0);
             defer child.end();
-            try sra.validatePath(path);
             var entry_reader = try srar.entryReader(entry);
             if (std.fs.path.dirname(path)) |sub_path| try output_dir.makePath(sub_path);
             var entry_file = try output_dir.createFile(path, .{});
@@ -266,6 +268,7 @@ pub fn doList(args: *std.process.ArgIterator) !void {
         }
         iter.reset();
         while (try iter.next(&srar)) |entry| {
+            try srar.validateEntry(entry);
             const path = std.mem.sliceTo(path_table[entry.path_offset - srar.path_table_offset..], 0);
             try sra.validatePath(path);
             try stdout.interface.print("{[size]f} {[offset]x: >[offset_w]} {[mtime]f} {[path]s}\n", .{

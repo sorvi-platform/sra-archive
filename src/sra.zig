@@ -305,6 +305,7 @@ pub const Reader = struct {
         const crc2 = try underlying_reader.interface.takeInt(u32, .little);
         const index_offset = try underlying_reader.interface.takeInt(u64, .little);
         const path_table_offset = try underlying_reader.interface.takeInt(u64, .little);
+        if (index_offset < path_table_offset) return error.InvalidArchive;
         return .{
             .underlying_reader = underlying_reader,
             .crc1 = crc1,
@@ -376,6 +377,22 @@ pub const Reader = struct {
             self.index = 0;
         }
     };
+
+
+    pub const EntryValidationError = error { InvalidArchive };
+
+    /// Validates the offsets, does not validate the path content itself
+    pub fn validateEntry(self: *@This(), entry: IndexEntry) EntryValidationError!void {
+        if (entry.path_offset < self.path_table_offset or entry.path_offset >= self.index_offset) {
+            return error.InvalidArchive;
+        }
+        if (entry.data_offset < header_size or entry.data_offset > self.path_table_offset) {
+            return error.InvalidArchive;
+        }
+        if (entry.data_offset + entry.data_length > self.path_table_offset) {
+            return error.InvalidArchive;
+        }
+    }
 
     const ReadError = std.fs.File.SeekError || std.Io.Reader.Error;
 
