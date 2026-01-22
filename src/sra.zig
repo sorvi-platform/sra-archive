@@ -49,6 +49,10 @@ pub const header_size = magic.len + @sizeOf(u32) * 2 + @sizeOf(u64) * 2;
 pub const PathValidationError = error { InvalidPath };
 
 pub fn validatePath(path: []const u8) PathValidationError!void {
+    if (path.len == 0) return error.InvalidPath;
+    if (path[0] == '/') return error.InvalidPath;
+    if (std.mem.indexOf(u8, path, "//")) |_| return error.InvalidPath;
+    if (path[path.len - 1] == '/') return error.InvalidPath;
     if (!std.unicode.utf8ValidateSlice(path)) return error.InvalidPath;
     var iter = std.mem.tokenizeScalar(u8, path, '/');
     while (iter.next()) |part| {
