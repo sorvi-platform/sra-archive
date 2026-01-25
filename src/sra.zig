@@ -17,7 +17,7 @@
 ///!     crc2: u32
 ///!     index_offset: u64
 ///!     path_table_offset: u64
-///!     ... file_data ...
+///!     ... file data ...
 ///!     ... null terminated paths ...
 ///!     ... index ...
 ///! index:
@@ -378,7 +378,6 @@ pub const Reader = struct {
             self.index = 0;
         }
     };
-
 
     pub const EntryValidationError = error { InvalidArchive };
 
