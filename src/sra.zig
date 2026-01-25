@@ -8,7 +8,7 @@
 ///! * '/' character, control characters and whitespace other than the space are not allowed in path components.
 ///! * This means paths may not contain newlines, tabs, and such.
 ///! * In addition to be nice to Windows, following characters are not allowed: [<>:"/\|?*]
-///! * Entries in the index may appear in any order. Applications must not rely on index ordering.
+///! * Entry order in index depends on the implementation. This reference implementation preserves the insertion order.
 ///! * mtime since epoch (UTC) in milliseconds is stored for fast file modification checks (syncing / updating the archive)
 ///!
 ///! LITTLE-ENDIAN:
