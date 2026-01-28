@@ -31,4 +31,17 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| run.addArgs(args);
     const step = b.step("run", "run sra-archive");
     step.dependOn(&run.step);
+
+    const tst = b.addTest(.{
+        .name = "sra-tests",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/tests.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const tst_run = b.addRunArtifact(tst);
+    const tst_step = b.step("test", "run tests");
+    tst_step.dependOn(&tst_run.step);
 }
