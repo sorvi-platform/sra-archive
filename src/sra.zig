@@ -162,8 +162,8 @@ pub const WriteStream = struct {
 
     pub const WriteDirError = error { InvalidFileType } || WriteFilePathError || std.fs.Dir.OpenError;
 
-    pub fn writeDir(self: *@This(), sub_path: []const u8, dir: std.fs.Dir) WriteDirError!void {
-        var walker = try std.fs.Dir.walk(dir, std.heap.smp_allocator);
+    pub fn writeDir(self: *@This(), tmp: std.mem.Allocator, sub_path: []const u8, dir: std.fs.Dir) WriteDirError!void {
+        var walker = try std.fs.Dir.walk(dir, tmp);
         defer walker.deinit();
         const did_push = try self.push(sub_path);
         defer if (did_push) self.pop();
@@ -176,10 +176,10 @@ pub const WriteStream = struct {
         }
     }
 
-    pub fn writeDirPath(self: *@This(), sub_path: []const u8, dir: std.fs.Dir, dir_path: []const u8) WriteDirError!void {
+    pub fn writeDirPath(self: *@This(), tmp: std.mem.Allocator, sub_path: []const u8, dir: std.fs.Dir, dir_path: []const u8) WriteDirError!void {
         var sub_dir = try dir.openDir(dir_path, .{.iterate = true, .no_follow = true});
         defer sub_dir.close();
-        try self.writeDir(sub_path, sub_dir);
+        try self.writeDir(tmp, sub_path, sub_dir);
     }
 
     pub const FinishError = std.Io.Writer.Error;
