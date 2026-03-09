@@ -340,7 +340,7 @@ pub const Reader = struct {
             var buffer: [64]u8 = undefined;
             const to_read = @min(buffer.len, end - pos);
             if (to_read == 0) break;
-            const read = try self.underlying_reader.read(buffer[0..to_read]);
+            const read = try self.underlying_reader.interface.readSliceShort(buffer[0..to_read]);
             pos += read;
             crc2.update(buffer[0..read]);
         }
