@@ -77,7 +77,7 @@ pub fn main() u8 {
 fn doArchiveWalkDir(parent_node: std.Progress.Node, sraw: *sra.Writer, base: []const u8, path: []const u8) !void {
     const node = parent_node.start(base, 0);
     defer node.end();
-    var dir = try std.fs.cwd().openDir(path, .{.iterate = true, .no_follow = true});
+    var dir = try std.fs.cwd().openDir(path, .{ .iterate = true, .no_follow = true });
     defer dir.close();
     var walker = try std.fs.Dir.walk(dir, allocator);
     defer walker.deinit();
@@ -157,7 +157,7 @@ pub fn doExtract(archive_path: []const u8, args: *std.process.ArgIterator) !void
         var iter = try srar.iterator();
         while (try iter.next(&srar)) |entry| {
             try srar.validateEntry(entry);
-            const path = std.mem.sliceTo(path_table[entry.path_offset - srar.path_table_offset..], 0);
+            const path = std.mem.sliceTo(path_table[entry.path_offset - srar.path_table_offset ..], 0);
             try sra.validatePath(path);
             try map.putNoClobber(arena.allocator(), path, entry);
         }
@@ -182,7 +182,7 @@ pub fn doExtract(archive_path: []const u8, args: *std.process.ArgIterator) !void
         defer node.end();
         while (try iter.next(&srar)) |entry| {
             try srar.validateEntry(entry);
-            const path = std.mem.sliceTo(path_table[entry.path_offset - srar.path_table_offset..], 0);
+            const path = std.mem.sliceTo(path_table[entry.path_offset - srar.path_table_offset ..], 0);
             try sra.validatePath(path);
             const child = node.start(path, 0);
             defer child.end();
@@ -233,7 +233,7 @@ const FmtDate = struct {
         const time = epoch.getDaySeconds();
         const year = epoch.getEpochDay().calculateYearDay();
         const month = year.calculateMonthDay();
-        try writer.print("{s} {d:0>2} {} {d:0>2}:{d:0>2}", .{@tagName(month.month), month.day_index, year.year, time.getHoursIntoDay(), time.getMinutesIntoHour()});
+        try writer.print("{s} {d:0>2} {} {d:0>2}:{d:0>2}", .{ @tagName(month.month), month.day_index, year.year, time.getHoursIntoDay(), time.getMinutesIntoHour() });
     }
 };
 
@@ -269,7 +269,7 @@ pub fn doList(args: *std.process.ArgIterator) !void {
         iter.reset();
         while (try iter.next(&srar)) |entry| {
             try srar.validateEntry(entry);
-            const path = std.mem.sliceTo(path_table[entry.path_offset - srar.path_table_offset..], 0);
+            const path = std.mem.sliceTo(path_table[entry.path_offset - srar.path_table_offset ..], 0);
             try sra.validatePath(path);
             try stdout.interface.print("{[size]f} {[offset]x: >[offset_w]} {[mtime]f} {[path]s}\n", .{
                 .size = fmtBytes(entry.data_length, longest_size_width),
@@ -279,9 +279,9 @@ pub fn doList(args: *std.process.ArgIterator) !void {
                 .path = path,
             });
         }
-        const width = try printSize("0x{x}, 0x{x}", .{srar.crc1, srar.crc2});
+        const width = try printSize("0x{x}, 0x{x}", .{ srar.crc1, srar.crc2 });
         _ = try stdout.interface.splatByte('-', width);
-        try stdout.interface.print("\n0x{x}, 0x{x}\n", .{srar.crc1, srar.crc2});
+        try stdout.interface.print("\n0x{x}, 0x{x}\n", .{ srar.crc1, srar.crc2 });
     }
     try stdout.interface.flush();
     std.process.exit(0);

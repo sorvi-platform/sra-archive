@@ -136,7 +136,7 @@ test "Writer and Reader - round trip" {
         var count: usize = 0;
         while (try iter.next(&reader)) |entry| {
             try reader.validateEntry(entry);
-            const path: []const u8 = std.mem.sliceTo(paths[entry.path_offset - reader.path_table_offset..], 0);
+            const path: []const u8 = std.mem.sliceTo(paths[entry.path_offset - reader.path_table_offset ..], 0);
             try sra.validatePath(path);
             try std.testing.expectEqualSlices(u8, files[count].name, path);
             try std.testing.expectEqual(files[count].data.len, entry.data_length);

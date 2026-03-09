@@ -40,13 +40,12 @@
 ///! The crc1 and crc2 only check the structural integrity of the archive.
 ///! Integrity of the entry data is not checked.
 ///! It is up to the reader to validate the integrity of the archive.
-
 const std = @import("std");
 
 pub const magic = "SRA\x00";
 pub const header_size = magic.len + @sizeOf(u32) * 2 + @sizeOf(u64) * 2;
 
-pub const PathValidationError = error { InvalidPath };
+pub const PathValidationError = error{InvalidPath};
 
 pub fn validatePath(path: []const u8) PathValidationError!void {
     if (path.len == 0) return error.InvalidPath;
@@ -94,7 +93,7 @@ pub const WriteStream = struct {
         };
     }
 
-    pub const PushError = error { OutOfMemory } || PathValidationError;
+    pub const PushError = error{OutOfMemory} || PathValidationError;
 
     pub fn push(self: *@This(), sub_path: []const u8) PushError!bool {
         if (sub_path.len == 0) return false;
@@ -106,7 +105,7 @@ pub const WriteStream = struct {
         _ = self.dir_stack.pop();
     }
 
-    pub const WriteFileBytesError = error { FileAlreadyExists } || PushError || std.Io.Writer.Error;
+    pub const WriteFileBytesError = error{FileAlreadyExists} || PushError || std.Io.Writer.Error;
 
     pub fn writeFileBytes(self: *@This(), sub_path: []const u8, bytes: []const u8, mtime: u64) WriteFileBytesError!void {
         std.debug.assert(try self.push(sub_path));
@@ -120,7 +119,7 @@ pub const WriteStream = struct {
         self.pos += bytes.len;
     }
 
-    pub const WriteFileError = error { FileAlreadyExists } || PushError || std.Io.Writer.Error || std.Io.Reader.Error;
+    pub const WriteFileError = error{FileAlreadyExists} || PushError || std.Io.Writer.Error || std.Io.Reader.Error;
 
     pub fn writeFileStream(self: *@This(), sub_path: []const u8, file_reader: *std.Io.Reader, mtime: u64) WriteFileError!void {
         std.debug.assert(try self.push(sub_path));
@@ -160,7 +159,7 @@ pub const WriteStream = struct {
         }
     }
 
-    pub const WriteDirError = error { InvalidFileType } || WriteFilePathError || std.fs.Dir.OpenError;
+    pub const WriteDirError = error{InvalidFileType} || WriteFilePathError || std.fs.Dir.OpenError;
 
     pub fn writeDir(self: *@This(), tmp: std.mem.Allocator, sub_path: []const u8, dir: std.fs.Dir) WriteDirError!void {
         var walker = try std.fs.Dir.walk(dir, tmp);
@@ -177,7 +176,7 @@ pub const WriteStream = struct {
     }
 
     pub fn writeDirPath(self: *@This(), tmp: std.mem.Allocator, sub_path: []const u8, dir: std.fs.Dir, dir_path: []const u8) WriteDirError!void {
-        var sub_dir = try dir.openDir(dir_path, .{.iterate = true, .no_follow = true});
+        var sub_dir = try dir.openDir(dir_path, .{ .iterate = true, .no_follow = true });
         defer sub_dir.close();
         try self.writeDir(tmp, sub_path, sub_dir);
     }
@@ -294,7 +293,7 @@ pub const Reader = struct {
     index_offset: u64,
     path_table_offset: u64,
 
-    pub const InitError = error { InvalidArchive } || std.Io.Reader.Error || std.fs.File.SeekError;
+    pub const InitError = error{InvalidArchive} || std.Io.Reader.Error || std.fs.File.SeekError;
 
     pub fn init(underlying_reader: *std.fs.File.Reader) !@This() {
         std.debug.assert(underlying_reader.mode == .positional);
@@ -316,7 +315,7 @@ pub const Reader = struct {
         };
     }
 
-    const ValidationError = error { InvalidChecksum } || ReadError;
+    const ValidationError = error{InvalidChecksum} || ReadError;
 
     pub fn validateCrc1(self: *@This()) ValidationError!void {
         var crc1: std.hash.Crc32 = .init();
@@ -379,7 +378,7 @@ pub const Reader = struct {
         }
     };
 
-    pub const EntryValidationError = error { InvalidArchive };
+    pub const EntryValidationError = error{InvalidArchive};
 
     /// Validates the offsets, does not validate the path content itself
     pub fn validateEntry(self: *@This(), entry: IndexEntry) EntryValidationError!void {
@@ -402,7 +401,7 @@ pub const Reader = struct {
         return .{ .index = 0, .num_entries = num_entries };
     }
 
-    const ReadAllocError = error { OutOfMemory } || ReadError;
+    const ReadAllocError = error{OutOfMemory} || ReadError;
 
     pub fn readStringTableAlloc(self: *@This(), allocator: std.mem.Allocator) ReadAllocError![]const u8 {
         const length = self.index_offset - self.path_table_offset;
