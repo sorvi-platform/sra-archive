@@ -3,6 +3,8 @@
 ///! Designed for fast random access.
 ///!
 ///! * All paths must be valid UTF8.
+///! * All paths must be unique (no duplicates).
+///! * Max path length is 65535 bytes.
 ///! * '/' is the path separator.
 ///! * May only contain absolute paths without leading '/'.
 ///! * '.' and '..' path components are not allowed.
@@ -14,31 +16,25 @@
 ///!
 ///! LITTLE-ENDIAN:
 ///!     SRA\0
-///!     crc1: u32
-///!     crc2: u32
-///!     index_offset: u64
-///!     path_table_offset: u64
-///!     ... file data ...
-///!     ... null terminated paths ...
-///!     ... index ...
-///! index:
-///!     num_entries: u64
-///!     ... entry ...
+///!     ... entry data ...
+///!     compressed_header: [compressed_header_length]u8
+///!     compressed_header_length: u64
+///!     decompressed_header_length: u64
+///!     crc: u32
+///! decompressed_header:
+///!     path_bytes_length: u64,
+///!     entries_length: u64,
+///!     path_bytes: [path_bytes_length]u8
+///!     entries: [entries_length]entry
 ///! entry:
-///!     path_offset: u64
+///!     path_offset: u48
+///!     path_length: u16
 ///!     data_offset: u64
 ///!     data_length: u64
 ///!     data_mtime: u64
 ///!
-///! crc1 is calculated in the following order:
-///! - index_offset
-///! - path_table_offset
-///! - num_entries
-///! - each entry
-///!
-///! crc2 is the checksum of bytes between path_table_offset and index_offset.
-///!
-///! The crc1 and crc2 only check the structural integrity of the archive.
+///! crc is the checksum of the decompressed_header bytes.
+///! compressed_header is compressed using flate compression.
 ///! Integrity of the entry data is not checked.
 ///! It is up to the reader to validate the integrity of the archive.
 ```

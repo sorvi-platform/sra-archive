@@ -35,25 +35,37 @@ test "validatePath - invalid paths" {
     try std.testing.expectError(error.InvalidPath, sra.validatePath("invalid\xFF\xFE"));
 }
 
-test "WriteStream" {
+test "Writer - write and finish" {
     var allocating: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer allocating.deinit();
-    var writer: sra.WriteStream = .init(std.testing.allocator, &allocating.writer);
+    var writer: sra.Writer = .init(std.testing.allocator, &allocating.writer);
     defer writer.deinit();
-    const content = "Hello, World!";
-    try writer.writeFileBytes("test.txt", content, 1234567890);
-    const header = try writer.finish();
-    try std.testing.expect(header.path_table_offset == sra.header_size + content.len);
-    try std.testing.expect(header.index_offset == header.path_table_offset + "test.txt\x00".len);
+    try writer.writeMagic(.default);
+    try writer.writeFileBytes("test.txt", "Hello, World!", 1234567890);
+    try writer.finish();
 }
 
-test "WriteStream - duplicate file error" {
+test "Writer - duplicate file error" {
     var allocating: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer allocating.deinit();
-    var writer: sra.WriteStream = .init(std.testing.allocator, &allocating.writer);
+    var writer: sra.Writer = .init(std.testing.allocator, &allocating.writer);
     defer writer.deinit();
+    try writer.writeMagic(.default);
     try writer.writeFileBytes("test.txt", "Content", 1000);
     try std.testing.expectError(error.FileAlreadyExists, writer.writeFileBytes("test.txt", "Other", 2000));
+}
+
+test "Writer - push/pop directory prefix" {
+    var allocating: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer allocating.deinit();
+    var writer: sra.Writer = .init(std.testing.allocator, &allocating.writer);
+    defer writer.deinit();
+    try writer.writeMagic(.default);
+    _ = try writer.push("assets");
+    try writer.writeFileBytes("image.png", "PNG data", 1000);
+    try writer.writeFileBytes("sound.ogg", "OGG data", 2000);
+    writer.pop();
+    try writer.finish();
 }
 
 test "Reader - invalid magic" {
@@ -63,8 +75,32 @@ test "Reader - invalid magic" {
     defer file.close();
     try file.writeAll("INVALID\x00");
     try file.seekTo(0);
-    var file_reader = file.reader(&.{});
-    try std.testing.expectError(error.InvalidArchive, sra.Reader.init(&file_reader));
+    var buffer: [16]u8 = undefined;
+    var file_reader = file.reader(&buffer);
+    try std.testing.expectError(error.InvalidArchive, sra.Reader.init(&file_reader, .default));
+}
+
+test "Reader - custom magic accepted and default magic rejected" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var file = try tmp.dir.createFile("custom.sra", .{ .read = true });
+    defer file.close();
+
+    {
+        var file_writer = file.writer(&.{});
+        var writer: sra.Writer = .init(std.testing.allocator, &file_writer.interface);
+        defer writer.deinit();
+        try writer.writeMagic(.{ .custom = "MYA\x00" });
+        try writer.writeFileBytes("a.txt", "data", 1000);
+        try writer.finish();
+    }
+
+    try file.seekTo(0);
+    var buffer: [16]u8 = undefined;
+    var file_reader = file.reader(&buffer);
+    try std.testing.expectError(error.InvalidArchive, sra.Reader.init(&file_reader, .default));
+    try file.seekTo(0);
+    _ = try sra.Reader.init(&file_reader, .{ .custom = "MYA\x00" });
 }
 
 test "Reader - validate CRC" {
@@ -76,24 +112,24 @@ test "Reader - validate CRC" {
 
     {
         var file_writer = file.writer(&.{});
-        var writer: sra.Writer = try .init(std.testing.allocator, &file_writer);
+        var writer: sra.Writer = .init(std.testing.allocator, &file_writer.interface);
         defer writer.deinit();
-        try writer.stream.writeFileBytes("test.txt", "Content", 1000);
+        try writer.writeMagic(.default);
+        try writer.writeFileBytes("test.txt", "Content", 1000);
         try writer.finish();
     }
 
     {
-        var buffer: [4096]u8 = undefined;
-        var writer = file.writer(&.{});
-        try writer.seekTo(4);
-        try writer.interface.writeInt(u32, 0xDEADBEEF, .little);
-        try writer.interface.writeInt(u32, 0xDEADBEEF, .little);
-        try file.seekTo(0);
-        var file_reader = file.reader(&buffer);
-        var reader: sra.Reader = try .init(&file_reader);
-        try std.testing.expectError(error.InvalidChecksum, reader.validateCrc1());
-        try std.testing.expectError(error.InvalidChecksum, reader.validateCrc2());
+        var file_writer = file.writer(&.{});
+        try file_writer.seekTo(try file.getEndPos() - 4);
+        try file_writer.interface.writeInt(u32, 0xDEADBEEF, .little);
     }
+
+    try file.seekTo(0);
+    var buffer: [16]u8 = undefined;
+    var file_reader = file.reader(&buffer);
+    var reader: sra.Reader = try .init(&file_reader, .default);
+    try std.testing.expectError(error.InvalidChecksum, reader.validateCrc());
 }
 
 test "Writer and Reader - round trip" {
@@ -117,26 +153,28 @@ test "Writer and Reader - round trip" {
 
     {
         var file_writer = file.writer(&.{});
-        var writer: sra.Writer = try .init(std.testing.allocator, &file_writer);
+        var writer: sra.Writer = .init(std.testing.allocator, &file_writer.interface);
         defer writer.deinit();
-        for (files) |f| try writer.stream.writeFileBytes(f.name, f.data, f.mtime);
+        try writer.writeMagic(.default);
+        for (files) |f| try writer.writeFileBytes(f.name, f.data, f.mtime);
         try writer.finish();
     }
 
     {
-        var buffer: [4096]u8 = undefined;
         try file.seekTo(0);
+        var buffer: [16]u8 = undefined;
         var file_reader = file.reader(&buffer);
-        var reader: sra.Reader = try .init(&file_reader);
-        try reader.validate();
-        const paths = try reader.readStringTableAlloc(std.testing.allocator);
-        defer std.testing.allocator.free(paths);
+        var reader: sra.Reader = try .init(&file_reader, .default);
+        try reader.validateCrc();
+
+        const path_bytes = try reader.allocPathBytes(std.testing.allocator);
+        defer std.testing.allocator.free(path_bytes);
+
         var iter = try reader.iterator();
-        try std.testing.expectEqual(3, iter.num_entries);
         var count: usize = 0;
         while (try iter.next(&reader)) |entry| {
-            try reader.validateEntry(entry);
-            const path: []const u8 = std.mem.sliceTo(paths[entry.path_offset - reader.path_table_offset ..], 0);
+            try entry.validate(&reader);
+            const path = entry.path.slice(path_bytes);
             try sra.validatePath(path);
             try std.testing.expectEqualSlices(u8, files[count].name, path);
             try std.testing.expectEqual(files[count].data.len, entry.data_length);
@@ -148,4 +186,110 @@ test "Writer and Reader - round trip" {
         }
         try std.testing.expectEqual(3, count);
     }
+}
+
+test "Writer and Reader - round trip with push/pop" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var file = try tmp.dir.createFile("test.sra", .{ .read = true });
+    defer file.close();
+
+    {
+        var file_writer = file.writer(&.{});
+        var writer: sra.Writer = .init(std.testing.allocator, &file_writer.interface);
+        defer writer.deinit();
+        try writer.writeMagic(.default);
+        _ = try writer.push("assets");
+        try writer.writeFileBytes("logo.png", "PNG", 100);
+        _ = try writer.push("sounds");
+        try writer.writeFileBytes("click.ogg", "OGG", 200);
+        writer.pop(); // sounds
+        writer.pop(); // assets
+        try writer.writeFileBytes("readme.txt", "README", 300);
+        try writer.finish();
+    }
+
+    {
+        try file.seekTo(0);
+        var buffer: [16]u8 = undefined;
+        var file_reader = file.reader(&buffer);
+        var reader: sra.Reader = try .init(&file_reader, .default);
+        try reader.validateCrc();
+
+        const path_bytes = try reader.allocPathBytes(std.testing.allocator);
+        defer std.testing.allocator.free(path_bytes);
+
+        const expected_paths: []const []const u8 = &.{
+            "assets/logo.png",
+            "assets/sounds/click.ogg",
+            "readme.txt",
+        };
+
+        var iter = try reader.iterator();
+        var count: usize = 0;
+        while (try iter.next(&reader)) |entry| {
+            const path = entry.path.slice(path_bytes);
+            try std.testing.expectEqualSlices(u8, expected_paths[count], path);
+            count += 1;
+        }
+        try std.testing.expectEqual(3, count);
+    }
+}
+
+test "Writer and Reader - empty archive" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var file = try tmp.dir.createFile("empty.sra", .{ .read = true });
+    defer file.close();
+
+    {
+        var file_writer = file.writer(&.{});
+        var writer: sra.Writer = .init(std.testing.allocator, &file_writer.interface);
+        defer writer.deinit();
+        try writer.writeMagic(.default);
+        try writer.finish();
+    }
+
+    {
+        try file.seekTo(0);
+        var buffer: [16]u8 = undefined;
+        var file_reader = file.reader(&buffer);
+        var reader: sra.Reader = try .init(&file_reader, .default);
+        try reader.validateCrc();
+        var iter = try reader.iterator();
+        const entry = try iter.next(&reader);
+        try std.testing.expectEqual(null, entry);
+    }
+}
+
+test "Path - slice" {
+    const path_bytes = "file1.txtdir/file2.txt";
+    const p1: sra.Path = .{ .offset = 0, .length = 9 };
+    const p2: sra.Path = .{ .offset = 9, .length = 13 };
+    try std.testing.expectEqualSlices(u8, "file1.txt", p1.slice(path_bytes));
+    try std.testing.expectEqualSlices(u8, "dir/file2.txt", p2.slice(path_bytes));
+}
+
+test "Path - validate" {
+    const path_bytes = "valid/path.txt";
+    const p: sra.Path = .{ .offset = 0, .length = @intCast(path_bytes.len) };
+    try p.validate(path_bytes);
+}
+
+test "Path - validate out of bounds" {
+    const path_bytes = "short";
+    const p: sra.Path = .{ .offset = 0, .length = 100 };
+    try std.testing.expectError(error.InvalidPath, p.validate(path_bytes));
+}
+
+test "Magic - default slice" {
+    const m: sra.Magic = .default;
+    try std.testing.expectEqualSlices(u8, "SRA\x00", m.slice());
+}
+
+test "Magic - custom slice" {
+    const m: sra.Magic = .{ .custom = "MYMAGIC\x00" };
+    try std.testing.expectEqualSlices(u8, "MYMAGIC\x00", m.slice());
 }

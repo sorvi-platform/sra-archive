@@ -53,6 +53,7 @@ pub fn main() u8 {
         else => {},
     } catch |err| {
         log.err("error: {s}", .{@errorName(err)});
+        if (@errorReturnTrace()) |trace| std.debug.dumpStackTrace(trace.*);
         return 70; // EX_SOFTWARE
     };
 
@@ -67,6 +68,7 @@ pub fn main() u8 {
         else => unreachable,
     } catch |err| {
         log.err("error: {s}", .{@errorName(err)});
+        if (@errorReturnTrace()) |trace| std.debug.dumpStackTrace(trace.*);
         return 70; // EX_SOFTWARE
     };
 
@@ -81,15 +83,21 @@ fn doArchiveWalkDir(parent_node: std.Progress.Node, sraw: *sra.Writer, base: []c
     defer dir.close();
     var walker = try std.fs.Dir.walk(dir, allocator);
     defer walker.deinit();
-    const did_push = try sraw.stream.push(base);
-    defer if (did_push) sraw.stream.pop();
+    const did_push = try sraw.push(base);
+    defer if (did_push) sraw.pop();
     while (try walker.next()) |entry| {
         switch (entry.kind) {
             .directory => {},
             .file => {
                 var child = node.start(entry.path, 0);
                 defer child.end();
-                try sraw.stream.writeFilePath(entry.path, entry.dir, entry.basename, null);
+                sraw.writeFilePath(entry.path, entry.dir, entry.basename, null) catch |err| switch (err) {
+                    error.InvalidPath => |e| {
+                        log.err("{s}", .{entry.path});
+                        return e;
+                    },
+                    else => |e| return e,
+                };
             },
             else => return error.InvalidFileType,
         }
@@ -105,8 +113,9 @@ pub fn doArchive(archive_path: []const u8, args: *std.process.ArgIterator) !void
     defer file.close();
     var buffer: [4096]u8 = undefined;
     var writer = file.writer(&buffer);
-    var sraw: sra.Writer = try .init(allocator, &writer);
+    var sraw: sra.Writer = .init(allocator, &writer.interface);
     defer sraw.deinit();
+    try sraw.writeMagic(.default);
     while (args.next()) |path| {
         const base = std.fs.path.basename(path);
         const st = try std.fs.cwd().statFile(path);
@@ -114,7 +123,13 @@ pub fn doArchive(archive_path: []const u8, args: *std.process.ArgIterator) !void
             .file => {
                 var child = node.start(base, 0);
                 defer child.end();
-                try sraw.stream.writeFilePath(base, std.fs.cwd(), path, @intCast(@divFloor(@max(0, st.mtime), std.time.ns_per_ms)));
+                sraw.writeFilePath(base, std.fs.cwd(), path, @intCast(@divFloor(@max(0, st.mtime), std.time.ns_per_ms))) catch |err| switch (err) {
+                    error.InvalidPath => |e| {
+                        log.err("{s}", .{base});
+                        return e;
+                    },
+                    else => |e| return e,
+                };
             },
             .directory => try doArchiveWalkDir(node, &sraw, base, path),
             else => return error.InvalidFileType,
@@ -147,19 +162,18 @@ pub fn doExtract(archive_path: []const u8, args: *std.process.ArgIterator) !void
     var file = try std.fs.cwd().openFile(archive_path, .{});
     defer file.close();
     var reader = file.reader(&buffer);
-    var srar: sra.Reader = try .init(&reader);
-    try srar.validate();
-    const path_table = try srar.readStringTableAlloc(arena.allocator());
+    var srar: sra.Reader = try .init(&reader, .default);
+    try srar.validateCrc();
+    const path_bytes = try srar.allocPathBytes(arena.allocator());
 
     var entry_buffer: [4096]u8 = undefined;
     if (paths.items.len > 0) {
-        var map: std.StringArrayHashMapUnmanaged(sra.IndexEntry) = .empty;
+        var map: std.StringArrayHashMapUnmanaged(sra.Entry) = .empty;
         var iter = try srar.iterator();
         while (try iter.next(&srar)) |entry| {
-            try srar.validateEntry(entry);
-            const path = std.mem.sliceTo(path_table[entry.path_offset - srar.path_table_offset ..], 0);
-            try sra.validatePath(path);
-            try map.putNoClobber(arena.allocator(), path, entry);
+            try entry.validate(&srar);
+            try entry.path.validate(path_bytes);
+            try map.putNoClobber(arena.allocator(), entry.path.slice(path_bytes), entry);
         }
         for (paths.items) |path| if (!map.contains(path)) return error.PathDoesNotExistInArchive;
         const node = root_node.start(archive_path, paths.items.len);
@@ -168,7 +182,7 @@ pub fn doExtract(archive_path: []const u8, args: *std.process.ArgIterator) !void
             const child = node.start(path, 0);
             defer child.end();
             const entry = map.get(path) orelse unreachable;
-            var entry_reader = try srar.entryReader(entry);
+            var entry_reader = try entry.dataReader(&reader);
             if (std.fs.path.dirname(path)) |sub_path| try output_dir.makePath(sub_path);
             var entry_file = try output_dir.createFile(path, .{});
             defer entry_file.close();
@@ -178,15 +192,15 @@ pub fn doExtract(archive_path: []const u8, args: *std.process.ArgIterator) !void
         }
     } else {
         var iter = try srar.iterator();
-        const node = root_node.start(archive_path, iter.num_entries);
+        const node = root_node.start(archive_path, iter.entries_length);
         defer node.end();
         while (try iter.next(&srar)) |entry| {
-            try srar.validateEntry(entry);
-            const path = std.mem.sliceTo(path_table[entry.path_offset - srar.path_table_offset ..], 0);
-            try sra.validatePath(path);
+            try entry.validate(&srar);
+            try entry.path.validate(path_bytes);
+            const path = entry.path.slice(path_bytes);
             const child = node.start(path, 0);
             defer child.end();
-            var entry_reader = try srar.entryReader(entry);
+            var entry_reader = try entry.dataReader(&reader);
             if (std.fs.path.dirname(path)) |sub_path| try output_dir.makePath(sub_path);
             var entry_file = try output_dir.createFile(path, .{});
             defer entry_file.close();
@@ -255,10 +269,10 @@ pub fn doList(args: *std.process.ArgIterator) !void {
         var file = try std.fs.cwd().openFile(archive_path, .{});
         defer file.close();
         var reader = file.reader(&buffer);
-        var srar: sra.Reader = try .init(&reader);
-        try srar.validate();
-        const path_table = try srar.readStringTableAlloc(allocator);
-        defer allocator.free(path_table);
+        var srar: sra.Reader = try .init(&reader, .default);
+        try srar.validateCrc();
+        const path_bytes = try srar.allocPathBytes(allocator);
+        defer allocator.free(path_bytes);
         var iter = try srar.iterator();
         var longest_size_width: u64 = 0;
         var longest_offset_width: u64 = 0;
@@ -266,11 +280,11 @@ pub fn doList(args: *std.process.ArgIterator) !void {
             longest_size_width = @max(try printSize("{f}", .{fmtBytes(entry.data_length, 0)}), longest_size_width);
             longest_offset_width = @max(try printSize("{x}", .{entry.data_offset}), longest_offset_width);
         }
-        iter.reset();
+        try iter.reset(&srar);
         while (try iter.next(&srar)) |entry| {
-            try srar.validateEntry(entry);
-            const path = std.mem.sliceTo(path_table[entry.path_offset - srar.path_table_offset ..], 0);
-            try sra.validatePath(path);
+            try entry.validate(&srar);
+            try entry.path.validate(path_bytes);
+            const path = entry.path.slice(path_bytes);
             try stdout.interface.print("{[size]f} {[offset]x: >[offset_w]} {[mtime]f} {[path]s}\n", .{
                 .size = fmtBytes(entry.data_length, longest_size_width),
                 .offset = entry.data_offset,
@@ -279,9 +293,9 @@ pub fn doList(args: *std.process.ArgIterator) !void {
                 .path = path,
             });
         }
-        const width = try printSize("0x{x}, 0x{x}", .{ srar.crc1, srar.crc2 });
+        const width = try printSize("0x{x}", .{srar.crc});
         _ = try stdout.interface.splatByte('-', width);
-        try stdout.interface.print("\n0x{x}, 0x{x}\n", .{ srar.crc1, srar.crc2 });
+        try stdout.interface.print("\n0x{x}\n", .{srar.crc});
     }
     try stdout.interface.flush();
     std.process.exit(0);
