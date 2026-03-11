@@ -33,6 +33,9 @@
 ///!     data_length: u64
 ///!     data_mtime: u64
 ///!
+///! data_offset is the absolute file offset
+///! path_offset is relative offset to path_bytes
+///!
 ///! crc is the checksum of the decompressed_header bytes.
 ///! compressed_header is compressed using flate compression.
 ///! Integrity of the entry data is not checked.
