@@ -69,25 +69,26 @@ test "Writer - push/pop directory prefix" {
 }
 
 test "Reader - invalid magic" {
+    const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var file = try tmp.dir.createFile("invalid.sra", .{ .read = true });
-    defer file.close();
-    try file.writeAll("INVALID\x00");
-    try file.seekTo(0);
+    var file = try tmp.dir.createFile(io, "invalid.sra", .{ .read = true });
+    defer file.close(io);
+    try file.writeStreamingAll(io, "INVALID\x00");
     var buffer: [16]u8 = undefined;
-    var file_reader = file.reader(&buffer);
+    var file_reader = file.reader(io, &buffer);
     try std.testing.expectError(error.InvalidArchive, sra.Reader.init(&file_reader, .default));
 }
 
 test "Reader - custom magic accepted and default magic rejected" {
+    const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    var file = try tmp.dir.createFile("custom.sra", .{ .read = true });
-    defer file.close();
+    var file = try tmp.dir.createFile(io, "custom.sra", .{ .read = true });
+    defer file.close(io);
 
     {
-        var file_writer = file.writer(&.{});
+        var file_writer = file.writer(io, &.{});
         var writer: sra.Writer = .init(std.testing.allocator, &file_writer.interface);
         defer writer.deinit();
         try writer.writeMagic(.{ .custom = "MYA\x00" });
@@ -95,23 +96,22 @@ test "Reader - custom magic accepted and default magic rejected" {
         try writer.finish();
     }
 
-    try file.seekTo(0);
     var buffer: [16]u8 = undefined;
-    var file_reader = file.reader(&buffer);
+    var file_reader = file.reader(io, &buffer);
     try std.testing.expectError(error.InvalidArchive, sra.Reader.init(&file_reader, .default));
-    try file.seekTo(0);
     _ = try sra.Reader.init(&file_reader, .{ .custom = "MYA\x00" });
 }
 
 test "Reader - validate CRC" {
+    const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var file = try tmp.dir.createFile("test.sra", .{ .read = true });
-    defer file.close();
+    var file = try tmp.dir.createFile(io, "test.sra", .{ .read = true });
+    defer file.close(io);
 
     {
-        var file_writer = file.writer(&.{});
+        var file_writer = file.writer(io, &.{});
         var writer: sra.Writer = .init(std.testing.allocator, &file_writer.interface);
         defer writer.deinit();
         try writer.writeMagic(.default);
@@ -120,24 +120,24 @@ test "Reader - validate CRC" {
     }
 
     {
-        var file_writer = file.writer(&.{});
-        try file_writer.seekTo(try file.getEndPos() - 4);
+        var file_writer = file.writer(io, &.{});
+        try file_writer.seekTo(try file.length(io) - 4);
         try file_writer.interface.writeInt(u32, 0xDEADBEEF, .little);
     }
 
-    try file.seekTo(0);
     var buffer: [16]u8 = undefined;
-    var file_reader = file.reader(&buffer);
+    var file_reader = file.reader(io, &buffer);
     var reader: sra.Reader = try .init(&file_reader, .default);
     try std.testing.expectError(error.InvalidChecksum, reader.validateCrc());
 }
 
 test "Writer and Reader - round trip" {
+    const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var file = try tmp.dir.createFile("test.sra", .{ .read = true });
-    defer file.close();
+    var file = try tmp.dir.createFile(io, "test.sra", .{ .read = true });
+    defer file.close(io);
 
     const File = struct {
         name: []const u8,
@@ -152,7 +152,7 @@ test "Writer and Reader - round trip" {
     };
 
     {
-        var file_writer = file.writer(&.{});
+        var file_writer = file.writer(io, &.{});
         var writer: sra.Writer = .init(std.testing.allocator, &file_writer.interface);
         defer writer.deinit();
         try writer.writeMagic(.default);
@@ -161,9 +161,8 @@ test "Writer and Reader - round trip" {
     }
 
     {
-        try file.seekTo(0);
         var buffer: [16]u8 = undefined;
-        var file_reader = file.reader(&buffer);
+        var file_reader = file.reader(io, &buffer);
         var reader: sra.Reader = try .init(&file_reader, .default);
         try reader.validateCrc();
 
@@ -180,7 +179,7 @@ test "Writer and Reader - round trip" {
             try std.testing.expectEqual(files[count].data.len, entry.data_length);
             try std.testing.expectEqual(files[count].mtime, entry.data_mtime);
             var dbuf: [1024]u8 = undefined;
-            const len = try file.preadAll(dbuf[0..entry.data_length], entry.data_offset);
+            const len = try file.readPositionalAll(io, dbuf[0..entry.data_length], entry.data_offset);
             try std.testing.expectEqualSlices(u8, files[count].data, dbuf[0..len]);
             count += 1;
         }
@@ -189,14 +188,15 @@ test "Writer and Reader - round trip" {
 }
 
 test "Writer and Reader - round trip with push/pop" {
+    const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var file = try tmp.dir.createFile("test.sra", .{ .read = true });
-    defer file.close();
+    var file = try tmp.dir.createFile(io, "test.sra", .{ .read = true });
+    defer file.close(io);
 
     {
-        var file_writer = file.writer(&.{});
+        var file_writer = file.writer(io, &.{});
         var writer: sra.Writer = .init(std.testing.allocator, &file_writer.interface);
         defer writer.deinit();
         try writer.writeMagic(.default);
@@ -211,9 +211,8 @@ test "Writer and Reader - round trip with push/pop" {
     }
 
     {
-        try file.seekTo(0);
         var buffer: [16]u8 = undefined;
-        var file_reader = file.reader(&buffer);
+        var file_reader = file.reader(io, &buffer);
         var reader: sra.Reader = try .init(&file_reader, .default);
         try reader.validateCrc();
 
@@ -238,14 +237,15 @@ test "Writer and Reader - round trip with push/pop" {
 }
 
 test "Writer and Reader - empty archive" {
+    const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    var file = try tmp.dir.createFile("empty.sra", .{ .read = true });
-    defer file.close();
+    var file = try tmp.dir.createFile(io, "empty.sra", .{ .read = true });
+    defer file.close(io);
 
     {
-        var file_writer = file.writer(&.{});
+        var file_writer = file.writer(io, &.{});
         var writer: sra.Writer = .init(std.testing.allocator, &file_writer.interface);
         defer writer.deinit();
         try writer.writeMagic(.default);
@@ -253,9 +253,8 @@ test "Writer and Reader - empty archive" {
     }
 
     {
-        try file.seekTo(0);
         var buffer: [16]u8 = undefined;
-        var file_reader = file.reader(&buffer);
+        var file_reader = file.reader(io, &buffer);
         var reader: sra.Reader = try .init(&file_reader, .default);
         try reader.validateCrc();
         var iter = try reader.iterator();

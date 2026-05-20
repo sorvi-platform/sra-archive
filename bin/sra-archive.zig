@@ -2,11 +2,11 @@ const std = @import("std");
 const sra = @import("sra");
 const log = std.log.scoped(.@"sra-archive");
 
-pub fn usage(failure: bool) noreturn {
+pub fn usage(io: std.Io, failure: bool) noreturn {
     var buf: [64]u8 = undefined;
     var writer = switch (failure) {
-        true => std.fs.File.stderr().writer(&buf),
-        false => std.fs.File.stdout().writer(&buf),
+        true => std.Io.File.stderr().writer(io, &buf),
+        false => std.Io.File.stdout().writer(io, &buf),
     };
     writer.interface.writeAll(
         \\usage:
@@ -22,8 +22,8 @@ pub fn usage(failure: bool) noreturn {
 
 const allocator = std.heap.smp_allocator;
 
-pub fn main() u8 {
-    var args = try std.process.argsWithAllocator(allocator);
+pub fn main(init: std.process.Init) u8 {
+    var args = try init.minimal.args.iterateAllocator(allocator);
     defer args.deinit();
     _ = args.skip();
 
@@ -38,37 +38,37 @@ pub fn main() u8 {
     const mode: Mode = D: {
         const arg = args.next() orelse {
             log.err("missing mode argument", .{});
-            usage(true);
+            usage(init.io, true);
         };
         const mode = std.meta.stringToEnum(Mode, arg) orelse {
             log.err("invalid mode: {s}", .{arg});
-            usage(true);
+            usage(init.io, true);
         };
         break :D mode;
     };
 
     _ = switch (mode) {
-        .@"--list" => doList(&args),
-        .@"--help" => usage(false),
+        .@"--list" => doList(init.io, &args),
+        .@"--help" => usage(init.io, false),
         else => {},
     } catch |err| {
         log.err("error: {s}", .{@errorName(err)});
-        if (@errorReturnTrace()) |trace| std.debug.dumpStackTrace(trace.*);
+        if (@errorReturnTrace()) |trace| std.debug.dumpErrorReturnTrace(trace);
         return 70; // EX_SOFTWARE
     };
 
     const archive_path = args.next() orelse {
         log.err("missing archive path", .{});
-        usage(true);
+        usage(init.io, true);
     };
 
     _ = switch (mode) {
-        .@"--archive" => doArchive(archive_path, &args),
-        .@"--extract" => doExtract(archive_path, &args),
+        .@"--archive" => doArchive(init.io, archive_path, &args),
+        .@"--extract" => doExtract(init.io, archive_path, &args),
         else => unreachable,
     } catch |err| {
         log.err("error: {s}", .{@errorName(err)});
-        if (@errorReturnTrace()) |trace| std.debug.dumpStackTrace(trace.*);
+        if (@errorReturnTrace()) |trace| std.debug.dumpErrorReturnTrace(trace);
         return 70; // EX_SOFTWARE
     };
 
@@ -76,22 +76,22 @@ pub fn main() u8 {
 }
 
 // This is same as sra.Writer.writeDir, but we want to have std.Progress
-fn doArchiveWalkDir(parent_node: std.Progress.Node, sraw: *sra.Writer, base: []const u8, path: []const u8) !void {
+fn doArchiveWalkDir(io: std.Io, parent_node: std.Progress.Node, sraw: *sra.Writer, base: []const u8, path: []const u8) !void {
     const node = parent_node.start(base, 0);
     defer node.end();
-    var dir = try std.fs.cwd().openDir(path, .{ .iterate = true, .no_follow = true });
-    defer dir.close();
-    var walker = try std.fs.Dir.walk(dir, allocator);
+    var dir = try std.Io.Dir.cwd().openDir(io, path, .{ .iterate = true, .follow_symlinks = false });
+    defer dir.close(io);
+    var walker = try std.Io.Dir.walk(dir, allocator);
     defer walker.deinit();
     const did_push = try sraw.push(base);
     defer if (did_push) sraw.pop();
-    while (try walker.next()) |entry| {
+    while (try walker.next(io)) |entry| {
         switch (entry.kind) {
             .directory => {},
             .file => {
                 var child = node.start(entry.path, 0);
                 defer child.end();
-                sraw.writeFilePath(entry.path, entry.dir, entry.basename, null) catch |err| switch (err) {
+                sraw.writeFilePath(io, entry.path, entry.dir, entry.basename, null) catch |err| switch (err) {
                     error.InvalidPath => |e| {
                         log.err("{s}", .{entry.path});
                         return e;
@@ -104,26 +104,26 @@ fn doArchiveWalkDir(parent_node: std.Progress.Node, sraw: *sra.Writer, base: []c
     }
 }
 
-pub fn doArchive(archive_path: []const u8, args: *std.process.ArgIterator) !void {
-    const root_node = std.Progress.start(.{});
+pub fn doArchive(io: std.Io, archive_path: []const u8, args: *std.process.Args.Iterator) !void {
+    const root_node = std.Progress.start(io, .{});
     defer root_node.end();
     const node = root_node.start(archive_path, 0);
     defer node.end();
-    var file = try std.fs.cwd().createFile(archive_path, .{});
-    defer file.close();
+    var file = try std.Io.Dir.cwd().createFile(io, archive_path, .{});
+    defer file.close(io);
     var buffer: [4096]u8 = undefined;
-    var writer = file.writer(&buffer);
+    var writer = file.writer(io, &buffer);
     var sraw: sra.Writer = .init(allocator, &writer.interface);
     defer sraw.deinit();
     try sraw.writeMagic(.default);
     while (args.next()) |path| {
         const base = std.fs.path.basename(path);
-        const st = try std.fs.cwd().statFile(path);
+        const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
         switch (st.kind) {
             .file => {
                 var child = node.start(base, 0);
                 defer child.end();
-                sraw.writeFilePath(base, std.fs.cwd(), path, @intCast(@divFloor(@max(0, st.mtime), std.time.ns_per_ms))) catch |err| switch (err) {
+                sraw.writeFilePath(io, base, std.Io.Dir.cwd(), path, @intCast(@max(0, st.mtime.toMilliseconds()))) catch |err| switch (err) {
                     error.InvalidPath => |e| {
                         log.err("{s}", .{base});
                         return e;
@@ -131,24 +131,24 @@ pub fn doArchive(archive_path: []const u8, args: *std.process.ArgIterator) !void
                     else => |e| return e,
                 };
             },
-            .directory => try doArchiveWalkDir(node, &sraw, base, path),
+            .directory => try doArchiveWalkDir(io, node, &sraw, base, path),
             else => return error.InvalidFileType,
         }
     }
     try sraw.finish();
 }
 
-pub fn doExtract(archive_path: []const u8, args: *std.process.ArgIterator) !void {
+pub fn doExtract(io: std.Io, archive_path: []const u8, args: *std.process.Args.Iterator) !void {
     const output_path = args.next() orelse {
         log.err("missing output path", .{});
-        usage(true);
+        usage(io, true);
     };
 
-    const root_node = std.Progress.start(.{});
+    const root_node = std.Progress.start(io, .{});
     defer root_node.end();
 
-    var output_dir = try std.fs.cwd().makeOpenPath(output_path, .{});
-    defer output_dir.close();
+    var output_dir = try std.Io.Dir.cwd().createDirPathOpen(io, output_path, .{});
+    defer output_dir.close(io);
 
     var arena: std.heap.ArenaAllocator = .init(allocator);
     defer arena.deinit();
@@ -159,9 +159,9 @@ pub fn doExtract(archive_path: []const u8, args: *std.process.ArgIterator) !void
     }
 
     var buffer: [4096]u8 = undefined;
-    var file = try std.fs.cwd().openFile(archive_path, .{});
-    defer file.close();
-    var reader = file.reader(&buffer);
+    var file = try std.Io.Dir.cwd().openFile(io, archive_path, .{});
+    defer file.close(io);
+    var reader = file.reader(io, &buffer);
     var srar: sra.Reader = try .init(&reader, .default);
     try srar.validateCrc();
     const path_bytes = try srar.allocPathBytes(arena.allocator());
@@ -183,10 +183,10 @@ pub fn doExtract(archive_path: []const u8, args: *std.process.ArgIterator) !void
             defer child.end();
             const entry = map.get(path) orelse unreachable;
             var entry_reader = try entry.dataReader(&reader);
-            if (std.fs.path.dirname(path)) |sub_path| try output_dir.makePath(sub_path);
-            var entry_file = try output_dir.createFile(path, .{});
-            defer entry_file.close();
-            var writer = entry_file.writer(&entry_buffer);
+            if (std.fs.path.dirname(path)) |sub_path| try output_dir.createDirPath(io, sub_path);
+            var entry_file = try output_dir.createFile(io, path, .{});
+            defer entry_file.close(io);
+            var writer = entry_file.writer(io, &entry_buffer);
             const written = try entry_reader.interface.streamRemaining(&writer.interface);
             std.debug.assert(written == entry.data_length);
         }
@@ -201,14 +201,17 @@ pub fn doExtract(archive_path: []const u8, args: *std.process.ArgIterator) !void
             const child = node.start(path, 0);
             defer child.end();
             var entry_reader = try entry.dataReader(&reader);
-            if (std.fs.path.dirname(path)) |sub_path| try output_dir.makePath(sub_path);
-            var entry_file = try output_dir.createFile(path, .{});
-            defer entry_file.close();
-            var writer = entry_file.writer(&entry_buffer);
+            if (std.fs.path.dirname(path)) |sub_path| try output_dir.createDirPath(io, sub_path);
+            var entry_file = try output_dir.createFile(io, path, .{});
+            defer entry_file.close(io);
+            var writer = entry_file.writer(io, &entry_buffer);
             const written = try entry_reader.interface.streamRemaining(&writer.interface);
             std.debug.assert(written == entry.data_length);
-            const mtime_ms: i128 = @intCast(entry.data_mtime);
-            try entry_file.updateTimes(mtime_ms * std.time.ns_per_ms, mtime_ms * std.time.ns_per_ms);
+            const mtime_ms: i96 = @intCast(entry.data_mtime);
+            try entry_file.setTimestamps(io, .{
+                .access_timestamp = .{ .new = .fromNanoseconds(mtime_ms * std.time.ns_per_ms) },
+                .modify_timestamp = .{ .new = .fromNanoseconds(mtime_ms * std.time.ns_per_ms) },
+            });
         }
     }
 }
@@ -261,14 +264,14 @@ fn printSize(comptime fmt: []const u8, args: anytype) !usize {
     return discarding.count;
 }
 
-pub fn doList(args: *std.process.ArgIterator) !void {
+pub fn doList(io: std.Io, args: *std.process.Args.Iterator) !void {
     var stdout_buffer: [64]u8 = undefined;
-    var stdout = std.fs.File.stdout().writer(&stdout_buffer);
+    var stdout = std.Io.File.stdout().writer(io, &stdout_buffer);
     var buffer: [4096]u8 = undefined;
     while (args.next()) |archive_path| {
-        var file = try std.fs.cwd().openFile(archive_path, .{});
-        defer file.close();
-        var reader = file.reader(&buffer);
+        var file = try std.Io.Dir.cwd().openFile(io, archive_path, .{});
+        defer file.close(io);
+        var reader = file.reader(io, &buffer);
         var srar: sra.Reader = try .init(&reader, .default);
         try srar.validateCrc();
         const path_bytes = try srar.allocPathBytes(allocator);

@@ -106,9 +106,9 @@ pub const Entry = struct {
     data_length: u64,
     data_mtime: u64,
 
-    pub const ReaderError = std.fs.File.Reader.SeekError;
+    pub const ReaderError = std.Io.File.Reader.SeekError;
 
-    pub fn dataReader(self: *const @This(), reader: *std.fs.File.Reader) ReaderError!std.Io.Reader.Limited {
+    pub fn dataReader(self: *const @This(), reader: *std.Io.File.Reader) ReaderError!std.Io.Reader.Limited {
         std.debug.assert(reader.mode == .positional);
         try reader.seekTo(self.data_offset);
         return reader.interface.limited(.limited64(self.data_length), &.{});
@@ -195,7 +195,7 @@ pub const Writer = struct {
         self.pos += size;
     }
 
-    pub fn writeFile(self: *@This(), sub_path: []const u8, file_reader: *std.fs.File.Reader, mtime: u64) WriteFileError!void {
+    pub fn writeFile(self: *@This(), sub_path: []const u8, file_reader: *std.Io.File.Reader, mtime: u64) WriteFileError!void {
         std.debug.assert(self.pos > 0); // magic is not written
         std.debug.assert(try self.push(sub_path));
         defer self.pop();
@@ -208,28 +208,28 @@ pub const Writer = struct {
         self.pos += size;
     }
 
-    pub const WriteFilePathError = WriteFileError || std.fs.File.OpenError;
+    pub const WriteFilePathError = WriteFileError || std.Io.File.OpenError || std.Io.File.StatError;
 
-    pub fn writeFilePath(self: *@This(), sub_path: []const u8, dir: std.fs.Dir, file_path: []const u8, mtime: ?u64) WriteFilePathError!void {
-        var file = try dir.openFile(file_path, .{});
-        defer file.close();
-        var reader = file.reader(&.{});
+    pub fn writeFilePath(self: *@This(), io: std.Io, sub_path: []const u8, dir: std.Io.Dir, file_path: []const u8, mtime: ?u64) WriteFilePathError!void {
+        var file = try dir.openFile(io, file_path, .{});
+        defer file.close(io);
+        var reader = file.reader(io, &.{});
         if (mtime) |ms| {
             try self.writeFile(sub_path, &reader, ms);
         } else {
-            const st = try file.stat();
-            try self.writeFile(sub_path, &reader, @intCast(@divFloor(@max(st.mtime, 0), std.time.ns_per_ms)));
+            const st = try file.stat(io);
+            try self.writeFile(sub_path, &reader, @intCast(@max(st.mtime.toMilliseconds(), 0)));
         }
     }
 
-    pub const WriteDirError = error{InvalidFileType} || WriteFilePathError || std.fs.Dir.OpenError;
+    pub const WriteDirError = error{InvalidFileType} || WriteFilePathError || std.Io.Dir.OpenError;
 
-    pub fn writeDir(self: *@This(), scratch: std.mem.Allocator, sub_path: []const u8, dir: std.fs.Dir) WriteDirError!void {
-        var walker = try std.fs.Dir.walk(dir, scratch);
+    pub fn writeDir(self: *@This(), scratch: std.mem.Allocator, io: std.Io, sub_path: []const u8, dir: std.Io.Dir) WriteDirError!void {
+        var walker = try std.Io.Dir.walk(dir, scratch);
         defer walker.deinit();
         const did_push = try self.push(sub_path);
         defer if (did_push) self.pop();
-        while (try walker.next()) |entry| {
+        while (try walker.next(io)) |entry| {
             switch (entry.kind) {
                 .directory => {},
                 .file => try self.writeFilePath(entry.path, entry.dir, entry.basename, null),
@@ -238,9 +238,9 @@ pub const Writer = struct {
         }
     }
 
-    pub fn writeDirPath(self: *@This(), scratch: std.mem.Allocator, sub_path: []const u8, dir: std.fs.Dir, dir_path: []const u8) WriteDirError!void {
-        var sub_dir = try dir.openDir(dir_path, .{ .iterate = true, .no_follow = true });
-        defer sub_dir.close();
+    pub fn writeDirPath(self: *@This(), scratch: std.mem.Allocator, io: std.Io, sub_path: []const u8, dir: std.Io.Dir, dir_path: []const u8) WriteDirError!void {
+        var sub_dir = try dir.openDir(io, dir_path, .{ .iterate = true, .follow_symlinks = false });
+        defer sub_dir.close(io);
         try self.writeDir(scratch, sub_path, sub_dir);
     }
 
@@ -393,16 +393,16 @@ pub const Writer = struct {
 };
 
 pub const Reader = struct {
-    underlying_reader: *std.fs.File.Reader,
+    underlying_reader: *std.Io.File.Reader,
     magic_length: u8,
     flate_offset: u64,
     flate_length: u64,
     header_length: u64,
     crc: u32,
 
-    pub const InitError = error{InvalidArchive} || std.Io.Reader.Error || std.fs.File.Reader.SeekError;
+    pub const InitError = error{InvalidArchive} || std.Io.Reader.Error || std.Io.File.Reader.SeekError;
 
-    pub fn init(underlying_reader: *std.fs.File.Reader, magic: Magic) !@This() {
+    pub fn init(underlying_reader: *std.Io.File.Reader, magic: Magic) !@This() {
         std.debug.assert(underlying_reader.mode == .positional);
         var magic_buf: [16]u8 = undefined;
         try underlying_reader.seekTo(0);
@@ -425,7 +425,7 @@ pub const Reader = struct {
         };
     }
 
-    pub const ValidationError = error{InvalidChecksum} || std.Io.Reader.Error || std.fs.File.Reader.SeekError;
+    pub const ValidationError = error{InvalidChecksum} || std.Io.Reader.Error || std.Io.File.Reader.SeekError;
 
     pub fn validateCrc(self: *@This()) ValidationError!void {
         var block: [16]u8 = undefined;
@@ -447,7 +447,7 @@ pub const Reader = struct {
         return .init(&self.underlying_reader.interface, .raw, buffer);
     }
 
-    const StreamError = std.Io.Reader.StreamError || std.fs.File.Reader.SeekError;
+    const StreamError = std.Io.Reader.StreamError || std.Io.File.Reader.SeekError;
 
     pub fn streamPathBytes(self: *@This(), writer: *std.Io.Writer) StreamError!void {
         var buffer: [compress.flate.max_window_len]u8 = undefined;
@@ -472,7 +472,7 @@ pub const Reader = struct {
         buffer: [compress.flate.max_window_len]u8,
         flate: compress.flate.Decompress,
 
-        pub const Error = std.Io.Reader.Error || std.fs.File.SeekError;
+        pub const Error = std.Io.Reader.Error || std.Io.File.SeekError;
 
         fn init(reader: *Reader) Error!@This() {
             var buffer: [compress.flate.max_window_len]u8 = undefined;
