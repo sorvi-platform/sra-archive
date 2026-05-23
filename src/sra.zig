@@ -371,7 +371,7 @@ pub const Writer = struct {
             try crc.writer.writeInt(u64, entry.data_mtime, .little);
         }
         try crc.writer.flush();
-        try flate.writer.flush();
+        try flate.finish();
         try counting.writer.flush();
         comptime std.debug.assert(@sizeOf(Entry) == 32);
         return .{
