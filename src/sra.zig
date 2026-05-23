@@ -41,11 +41,6 @@
 ///! It is up to the reader to validate the integrity of the archive.
 const std = @import("std");
 
-// backported 0.16 std.compress
-const compress = struct {
-    const flate = @import("compress/flate.zig");
-};
-
 pub const PathValidationError = error{InvalidPath};
 
 pub fn validatePath(path: []const u8) PathValidationError!void {
@@ -356,8 +351,8 @@ pub const Writer = struct {
         var counting_buffer: [16]u8 = undefined;
         // how nice it would be if compress apis gave compressed and uncompressed sizes .. :)
         var counting: Counting = .init(writer, &counting_buffer);
-        var buffer: [compress.flate.max_window_len]u8 = undefined;
-        var flate: compress.flate.Compress = try .init(&counting.writer, &buffer, .raw, .default);
+        var buffer: [std.compress.flate.max_window_len]u8 = undefined;
+        var flate: std.compress.flate.Compress = try .init(&counting.writer, &buffer, .raw, .default);
         // and how nice would it be if compress apis had hooks or custom hasher
         var crc: std.Io.Writer.Hashed(std.hash.Crc32) = .initHasher(&flate.writer, .init(), &.{});
         var path_bytes_length: u64 = 0;
@@ -431,7 +426,7 @@ pub const Reader = struct {
         var block: [16]u8 = undefined;
         var bytes_left = self.header_length;
         var hasher: std.hash.Crc32 = .init();
-        var buffer: [compress.flate.max_window_len]u8 = undefined;
+        var buffer: [std.compress.flate.max_window_len]u8 = undefined;
         var flate = try self.flateReader(&buffer);
         while (bytes_left > 0) {
             const len = @min(block.len, bytes_left);
@@ -442,7 +437,7 @@ pub const Reader = struct {
         if (self.crc != hasher.final()) return error.InvalidChecksum;
     }
 
-    fn flateReader(self: *@This(), buffer: []u8) !compress.flate.Decompress {
+    fn flateReader(self: *@This(), buffer: []u8) !std.compress.flate.Decompress {
         try self.underlying_reader.seekTo(self.flate_offset);
         return .init(&self.underlying_reader.interface, .raw, buffer);
     }
@@ -450,7 +445,7 @@ pub const Reader = struct {
     const StreamError = std.Io.Reader.StreamError || std.Io.File.Reader.SeekError;
 
     pub fn streamPathBytes(self: *@This(), writer: *std.Io.Writer) StreamError!void {
-        var buffer: [compress.flate.max_window_len]u8 = undefined;
+        var buffer: [std.compress.flate.max_window_len]u8 = undefined;
         var flate = try self.flateReader(&buffer);
         const path_bytes_length = try flate.reader.takeInt(u64, .little);
         try flate.reader.discardAll(8);
@@ -469,13 +464,13 @@ pub const Reader = struct {
         index: u64,
         entries_length: u64,
         raw_offset: u64,
-        buffer: [compress.flate.max_window_len]u8,
-        flate: compress.flate.Decompress,
+        buffer: [std.compress.flate.max_window_len]u8,
+        flate: std.compress.flate.Decompress,
 
         pub const Error = std.Io.Reader.Error || std.Io.File.SeekError;
 
         fn init(reader: *Reader) Error!@This() {
-            var buffer: [compress.flate.max_window_len]u8 = undefined;
+            var buffer: [std.compress.flate.max_window_len]u8 = undefined;
             var flate = try reader.flateReader(&buffer);
             const path_bytes_length = try flate.reader.takeInt(u64, .little);
             const entries_length = try flate.reader.takeInt(u64, .little);
