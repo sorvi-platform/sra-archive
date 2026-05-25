@@ -1,7 +1,7 @@
 .{
     .name = .sra_archive,
     .version = "0.1.0",
-    .fingerprint = 0x717526d45ab2dc79,
+    .fingerprint = 0x717526d4fc3f1049,
     .dependencies = .{},
     .paths = .{
         "LICENSE",
