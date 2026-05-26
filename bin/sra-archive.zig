@@ -250,7 +250,7 @@ const FmtDate = struct {
         const time = epoch.getDaySeconds();
         const year = epoch.getEpochDay().calculateYearDay();
         const month = year.calculateMonthDay();
-        try writer.print("{s} {d:0>2} {} {d:0>2}:{d:0>2}", .{ @tagName(month.month), month.day_index, year.year, time.getHoursIntoDay(), time.getMinutesIntoHour() });
+        try writer.print("{t} {d:0>2} {} {d:0>2}:{d:0>2}", .{ month.month, month.day_index, year.year, time.getHoursIntoDay(), time.getMinutesIntoHour() });
     }
 };
 
