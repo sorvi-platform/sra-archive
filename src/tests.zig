@@ -179,7 +179,7 @@ test "Writer and Reader - round trip" {
             try std.testing.expectEqual(files[count].data.len, entry.data_length);
             try std.testing.expectEqual(files[count].mtime, entry.data_mtime);
             var dbuf: [1024]u8 = undefined;
-            const len = try file.readPositionalAll(io, dbuf[0..entry.data_length], entry.data_offset);
+            const len = try file.readPositionalAll(io, dbuf[0..@intCast(entry.data_length)], entry.data_offset);
             try std.testing.expectEqualSlices(u8, files[count].data, dbuf[0..len]);
             count += 1;
         }

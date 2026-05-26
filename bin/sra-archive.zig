@@ -192,7 +192,7 @@ pub fn doExtract(io: std.Io, archive_path: []const u8, args: *std.process.Args.I
         }
     } else {
         var iter = try srar.iterator();
-        const node = root_node.start(archive_path, iter.entries_length);
+        const node = root_node.start(archive_path, @intCast(iter.entries_length));
         defer node.end();
         while (try iter.next(&srar)) |entry| {
             try entry.validate(&srar);
@@ -233,7 +233,7 @@ const FmtBytes = struct {
         const decimal = remainder * 10 / 1024;
         var discarding: std.Io.Writer.Discarding = .init(&.{});
         try discarding.writer.print("{d}.{d} {s}", .{ value, decimal, units[unit_index] });
-        if (self.width > discarding.count) _ = try writer.splatByte(' ', self.width - discarding.count);
+        if (self.width > discarding.count) _ = try writer.splatByte(' ', @intCast(self.width - discarding.count));
         try writer.print("{d}.{d} {s}", .{ value, decimal, units[unit_index] });
     }
 };
@@ -261,7 +261,7 @@ fn fmtDate(secs: u64) FmtDate {
 fn printSize(comptime fmt: []const u8, args: anytype) !usize {
     var discarding: std.Io.Writer.Discarding = .init(&.{});
     try discarding.writer.print(fmt, args);
-    return discarding.count;
+    return @intCast(discarding.count);
 }
 
 pub fn doList(io: std.Io, args: *std.process.Args.Iterator) !void {
@@ -277,8 +277,8 @@ pub fn doList(io: std.Io, args: *std.process.Args.Iterator) !void {
         const path_bytes = try srar.allocPathBytes(allocator);
         defer allocator.free(path_bytes);
         var iter = try srar.iterator();
-        var longest_size_width: u64 = 0;
-        var longest_offset_width: u64 = 0;
+        var longest_size_width: usize = 0;
+        var longest_offset_width: usize = 0;
         while (try iter.next(&srar)) |entry| {
             longest_size_width = @max(try printSize("{f}", .{fmtBytes(entry.data_length, 0)}), longest_size_width);
             longest_offset_width = @max(try printSize("{x}", .{entry.data_offset}), longest_offset_width);

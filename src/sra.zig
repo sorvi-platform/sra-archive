@@ -82,7 +82,7 @@ pub const Path = packed struct(u64) {
     const later: @This() = .{ .offset = 0, .length = 0 };
 
     pub fn slice(self: @This(), path_bytes: []const u8) []const u8 {
-        return path_bytes[self.offset..][0..self.length];
+        return path_bytes[@intCast(self.offset)..][0..self.length];
     }
 
     pub const ValidationError = PathValidationError;
