@@ -1,8 +1,29 @@
 const std = @import("std");
 
+// zlinter-disable-next-line require_doc_comment
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const zlinter = @import("zlinter");
+    const lint_cmd = b.step("lint", "Lint source code");
+    lint_cmd.dependOn(step: {
+        var builder = zlinter.builder(b, .{});
+        inline for (std.enums.values(zlinter.BuiltinLintRule)) |v| {
+            if (v == .declaration_naming) continue;
+            if (v == .field_naming) continue;
+            if (v == .no_orelse_unreachable) continue;
+            if (v == .require_exhaustive_enum_switch) continue;
+            if (v == .no_undefined) continue;
+            if (v == .field_ordering) continue;
+            if (v == .import_ordering) continue;
+            if (v == .no_todo) continue;
+            if (v == .max_positional_args) continue;
+            if (v == .no_panic) continue;
+            builder.addRule(.{ .builtin = v }, .{});
+        }
+        break :step builder.build();
+    });
 
     const mod = b.addModule("sra", .{
         .root_source_file = b.path("src/sra.zig"),

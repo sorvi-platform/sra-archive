@@ -2,11 +2,16 @@ const std = @import("std");
 const sra = @import("sra");
 const log = std.log.scoped(.@"sra-archive");
 
-pub fn usage(io: std.Io, failure: bool) noreturn {
+const UsageKind = enum {
+    failure,
+    ok,
+};
+
+fn usage(io: std.Io, kind: UsageKind) noreturn {
     var buf: [64]u8 = undefined;
-    var writer = switch (failure) {
-        true => std.Io.File.stderr().writer(io, &buf),
-        false => std.Io.File.stdout().writer(io, &buf),
+    var writer = switch (kind) {
+        .failure => std.Io.File.stderr().writer(io, &buf),
+        .ok => std.Io.File.stdout().writer(io, &buf),
     };
     writer.interface.writeAll(
         \\usage:
@@ -16,12 +21,15 @@ pub fn usage(io: std.Io, failure: bool) noreturn {
         \\
     ) catch @panic("cannot write to out stream");
     writer.interface.flush() catch @panic("cannot flush");
-    if (failure) std.process.exit(64); // EX_USAGE
-    std.process.exit(0);
+    switch (kind) {
+        .failure => std.process.exit(64), // EX_USAGE
+        .ok => std.process.exit(0),
+    }
 }
 
 const allocator = std.heap.smp_allocator;
 
+// zlinter-disable-next-line require_doc_comment
 pub fn main(init: std.process.Init) u8 {
     var args = try init.minimal.args.iterateAllocator(allocator);
     defer args.deinit();
@@ -38,18 +46,18 @@ pub fn main(init: std.process.Init) u8 {
     const mode: Mode = D: {
         const arg = args.next() orelse {
             log.err("missing mode argument", .{});
-            usage(init.io, true);
+            usage(init.io, .failure);
         };
         const mode = std.meta.stringToEnum(Mode, arg) orelse {
             log.err("invalid mode: {s}", .{arg});
-            usage(init.io, true);
+            usage(init.io, .failure);
         };
         break :D mode;
     };
 
     _ = switch (mode) {
         .@"--list" => doList(init.io, &args),
-        .@"--help" => usage(init.io, false),
+        .@"--help" => usage(init.io, .ok),
         else => {},
     } catch |err| {
         log.err("error: {s}", .{@errorName(err)});
@@ -59,7 +67,7 @@ pub fn main(init: std.process.Init) u8 {
 
     const archive_path = args.next() orelse {
         log.err("missing archive path", .{});
-        usage(init.io, true);
+        usage(init.io, .failure);
     };
 
     _ = switch (mode) {
@@ -104,7 +112,7 @@ fn doArchiveWalkDir(io: std.Io, parent_node: std.Progress.Node, sraw: *sra.Write
     }
 }
 
-pub fn doArchive(io: std.Io, archive_path: []const u8, args: *std.process.Args.Iterator) !void {
+fn doArchive(io: std.Io, archive_path: []const u8, args: *std.process.Args.Iterator) !void {
     const root_node = std.Progress.start(io, .{});
     defer root_node.end();
     const node = root_node.start(archive_path, 0);
@@ -117,7 +125,7 @@ pub fn doArchive(io: std.Io, archive_path: []const u8, args: *std.process.Args.I
     defer sraw.deinit();
     try sraw.writeMagic(.default);
     while (args.next()) |path| {
-        const base = std.fs.path.basename(path);
+        const base = std.Io.Dir.path.basename(path);
         const st = try std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false });
         switch (st.kind) {
             .file => {
@@ -138,10 +146,10 @@ pub fn doArchive(io: std.Io, archive_path: []const u8, args: *std.process.Args.I
     try sraw.finish();
 }
 
-pub fn doExtract(io: std.Io, archive_path: []const u8, args: *std.process.Args.Iterator) !void {
+fn doExtract(io: std.Io, archive_path: []const u8, args: *std.process.Args.Iterator) !void {
     const output_path = args.next() orelse {
         log.err("missing output path", .{});
-        usage(io, true);
+        usage(io, .failure);
     };
 
     const root_node = std.Progress.start(io, .{});
@@ -154,6 +162,7 @@ pub fn doExtract(io: std.Io, archive_path: []const u8, args: *std.process.Args.I
     defer arena.deinit();
 
     var paths: std.ArrayList([]const u8) = .empty;
+    defer paths.deinit(arena.allocator());
     while (args.next()) |path| {
         try paths.append(arena.allocator(), try arena.allocator().dupe(u8, path));
     }
@@ -168,7 +177,7 @@ pub fn doExtract(io: std.Io, archive_path: []const u8, args: *std.process.Args.I
 
     var entry_buffer: [4096]u8 = undefined;
     if (paths.items.len > 0) {
-        var map: std.StringArrayHashMapUnmanaged(sra.Entry) = .empty;
+        var map: std.array_hash_map.String(sra.Entry) = .empty;
         var iter = try srar.iterator();
         while (try iter.next(&srar)) |entry| {
             try entry.validate(&srar);
@@ -183,7 +192,7 @@ pub fn doExtract(io: std.Io, archive_path: []const u8, args: *std.process.Args.I
             defer child.end();
             const entry = map.get(path) orelse unreachable;
             var entry_reader = try entry.dataReader(&reader);
-            if (std.fs.path.dirname(path)) |sub_path| try output_dir.createDirPath(io, sub_path);
+            if (std.Io.Dir.path.dirname(path)) |sub_path| try output_dir.createDirPath(io, sub_path);
             var entry_file = try output_dir.createFile(io, path, .{});
             defer entry_file.close(io);
             var writer = entry_file.writer(io, &entry_buffer);
@@ -201,7 +210,7 @@ pub fn doExtract(io: std.Io, archive_path: []const u8, args: *std.process.Args.I
             const child = node.start(path, 0);
             defer child.end();
             var entry_reader = try entry.dataReader(&reader);
-            if (std.fs.path.dirname(path)) |sub_path| try output_dir.createDirPath(io, sub_path);
+            if (std.Io.Dir.path.dirname(path)) |sub_path| try output_dir.createDirPath(io, sub_path);
             var entry_file = try output_dir.createFile(io, path, .{});
             defer entry_file.close(io);
             var writer = entry_file.writer(io, &entry_buffer);
@@ -220,7 +229,8 @@ const FmtBytes = struct {
     bytes: u64,
     width: u64,
 
-    pub fn format(self: @This(), writer: *std.Io.Writer) !void {
+    // zlinter-disable-next-line require_doc_comment
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         const units: []const []const u8 = &.{ "B", "KiB", "MiB", "GiB", "TiB", "PiB" };
         var value = self.bytes;
         var remainder: u64 = 0;
@@ -245,7 +255,8 @@ fn fmtBytes(bytes: u64, width: u64) FmtBytes {
 const FmtDate = struct {
     secs: u64,
 
-    pub fn format(self: @This(), writer: *std.Io.Writer) !void {
+    // zlinter-disable-next-line require_doc_comment
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         const epoch: std.time.epoch.EpochSeconds = .{ .secs = self.secs / std.time.ms_per_s };
         const time = epoch.getDaySeconds();
         const year = epoch.getEpochDay().calculateYearDay();
@@ -264,7 +275,7 @@ fn printSize(comptime fmt: []const u8, args: anytype) !usize {
     return @intCast(discarding.count);
 }
 
-pub fn doList(io: std.Io, args: *std.process.Args.Iterator) !void {
+fn doList(io: std.Io, args: *std.process.Args.Iterator) !void {
     var stdout_buffer: [64]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io, &stdout_buffer);
     var buffer: [4096]u8 = undefined;
