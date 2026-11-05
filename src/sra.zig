@@ -464,12 +464,12 @@ pub const Reader = struct {
     pub const InitError = error{
         /// Not a valid SRA archive
         InvalidArchive,
-    } || std.Io.Reader.Error || std.Io.File.Reader.SeekError;
+    } || std.Io.Reader.Error || std.Io.File.Reader.SizeError || std.Io.File.Reader.SeekError;
 
     /// Initializes the reader
     /// Provide seekable `underlying_reader` from where the bytes will be read from
     /// Failing to contain the `magic` as starting bytes causes `error.InvalidArchive` to be returned
-    pub fn init(underlying_reader: *std.Io.File.Reader, magic: Magic) !@This() {
+    pub fn init(underlying_reader: *std.Io.File.Reader, magic: Magic) InitError!@This() {
         std.debug.assert(underlying_reader.mode == .positional);
         var magic_buf: [16]u8 = undefined;
         try underlying_reader.seekTo(0);
