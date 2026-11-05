@@ -4,8 +4,9 @@
     .fingerprint = 0x717526d4fc3f1049,
     .dependencies = .{
         .zlinter = .{
-            .url = "git+https://github.com/kurtwagner/zlinter?ref=0.16.x#c44f11b507362b59a55fca1062d89dfdffd167df",
-            .hash = "zlinter-0.0.1-OjQ08avrCwDXLzWbn6PYtfEopUVPSxuNQDJ1dGvRhhCp",
+            .url = "git+https://github.com/Cloudef/zlinter#0aea0eeff90398217e3509f79202b998a98709bd",
+            .hash = "zlinter-0.0.1-OjQ08c5qFgD4dP3mhGRiuMG3-UbZv2-hZS08VuExt0RJ",
+            .lazy = true,
         },
     },
     .paths = .{

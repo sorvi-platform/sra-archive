@@ -1,6 +1,3 @@
-const std = @import("std");
-const sra = @import("sra.zig");
-
 test "validatePath - valid paths" {
     try sra.validatePath("file.txt");
     try sra.validatePath("dir/file.txt");
@@ -292,3 +289,6 @@ test "Magic - custom slice" {
     const m: sra.Magic = .{ .custom = "MYMAGIC\x00" };
     try std.testing.expectEqualSlices(u8, "MYMAGIC\x00", m.slice());
 }
+
+const std = @import("std");
+const sra = @import("sra.zig");

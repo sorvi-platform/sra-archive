@@ -39,7 +39,6 @@
 ///! compressed_header is compressed using flate compression.
 ///! Integrity of the entry data is not checked.
 ///! It is up to the reader to validate the integrity of the archive.
-const std = @import("std");
 
 // zlinter-disable-next-line require_doc_comment
 pub const PathValidationError = error{
@@ -536,3 +535,5 @@ pub const Reader = struct {
         return .init(self);
     }
 };
+
+const std = @import("std");

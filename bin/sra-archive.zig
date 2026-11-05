@@ -1,7 +1,3 @@
-const std = @import("std");
-const sra = @import("sra");
-const log = std.log.scoped(.@"sra-archive");
-
 const UsageKind = enum {
     failure,
     ok,
@@ -314,3 +310,7 @@ fn doList(io: std.Io, args: *std.process.Args.Iterator) !void {
     try stdout.interface.flush();
     std.process.exit(0);
 }
+
+const log = std.log.scoped(.@"sra-archive");
+const std = @import("std");
+const sra = @import("sra");
