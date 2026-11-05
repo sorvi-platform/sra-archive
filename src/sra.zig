@@ -319,67 +319,6 @@ pub const Writer = struct {
         self.pos = 0;
     }
 
-    // this really should be part of the std
-    fn drainInto(writer: *std.Io.Writer, data: []const []const u8, splat: usize, sink: anytype) std.Io.Writer.Error!usize {
-        const max_buffers_len = 16;
-        const buffered = writer.buffered();
-        var iov: [max_buffers_len][]const u8 = undefined;
-        var len: usize = 0;
-        if (buffered.len > 0) {
-            iov[len] = buffered;
-            len += 1;
-        }
-        for (data[0 .. data.len - 1]) |d| {
-            if (d.len == 0) continue;
-            iov[len] = d;
-            len += 1;
-            if (iov.len - len == 0) break;
-        }
-        const pattern = data[data.len - 1];
-        if (iov.len - len != 0) switch (splat) {
-            0 => {},
-            1 => if (pattern.len != 0) {
-                iov[len] = pattern;
-                len += 1;
-            },
-            else => switch (pattern.len) {
-                0 => {},
-                1 => {
-                    const splat_buffer_candidate = writer.buffer[writer.end..];
-                    var backup_buffer: [64]u8 = undefined;
-                    const splat_buffer = if (splat_buffer_candidate.len >= backup_buffer.len)
-                        splat_buffer_candidate
-                    else
-                        &backup_buffer;
-                    const memset_len = @min(splat_buffer.len, splat);
-                    const buf = splat_buffer[0..memset_len];
-                    @memset(buf, pattern[0]);
-                    iov[len] = buf;
-                    len += 1;
-                    var remaining_splat = splat - buf.len;
-                    while (remaining_splat > splat_buffer.len and iov.len - len != 0) {
-                        std.debug.assert(buf.len == splat_buffer.len);
-                        iov[len] = splat_buffer;
-                        len += 1;
-                        remaining_splat -= splat_buffer.len;
-                    }
-                    if (remaining_splat > 0 and iov.len - len != 0) {
-                        iov[len] = splat_buffer[0..remaining_splat];
-                        len += 1;
-                    }
-                },
-                else => for (0..splat) |_| {
-                    iov[len] = pattern;
-                    len += 1;
-                    if (iov.len - len == 0) break;
-                },
-            },
-        };
-        if (len == 0) return 0;
-        const written = sink.writev(iov[0..len]) catch return error.WriteFailed;
-        return writer.consume(written);
-    }
-
     const Counting = struct {
         written: u64,
         writer: std.Io.Writer,
@@ -398,15 +337,12 @@ pub const Writer = struct {
             };
         }
 
-        fn writev(self: *@This(), data: []const []const u8) !usize {
-            const written = try self.underlying_writer.writeVec(data);
-            self.written += written;
-            return written;
-        }
-
         fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
             const self: *@This() = @fieldParentPtr("writer", w);
-            return drainInto(w, data, splat, self);
+            std.debug.assert(data.len != 0);
+            const written = try self.underlying_writer.writeSplatHeader(w.buffered(), data, splat);
+            self.written += written;
+            return w.consume(written);
         }
     };
 
