@@ -456,7 +456,7 @@ pub const Reader = struct {
     }
 
     // zlinter-disable-next-line require_doc_comment
-    const StreamError = std.Io.Reader.StreamError || std.Io.File.Reader.SeekError;
+    pub const StreamError = std.Io.Reader.StreamError || std.Io.File.Reader.SeekError;
 
     /// Stream the path bytes from the archive into the given `writer`
     pub fn streamPathBytes(self: *@This(), writer: *std.Io.Writer) StreamError!void {
@@ -468,7 +468,7 @@ pub const Reader = struct {
     }
 
     // zlinter-disable-next-line require_doc_comment
-    const AllocError = error{
+    pub const AllocError = error{
         /// The allocator failed to allocate memory
         OutOfMemory,
     } || StreamError;
